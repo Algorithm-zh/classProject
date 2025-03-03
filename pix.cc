@@ -9,6 +9,44 @@ Pix::Pix(const std::string path, int width, int heigh)  {
   width_ = width;
   heigh_ = heigh;
   frame_number = 0;
+  yuv_frame = av_frame_alloc();
+
+  if (avformat_open_input(&format_context, path_.c_str(), nullptr, nullptr) < 0) {
+        std::cerr << "无法打开RTSP流" << std::endl;
+        return;
+    }
+
+    // 查找流信息
+    if (avformat_find_stream_info(format_context, nullptr) < 0) {
+        std::cerr << "无法获取流信息" << std::endl;
+        return;
+    }
+    
+    video_stream = av_find_best_stream(format_context, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
+    
+    if (video_stream == -1) {
+        std::cerr << "未找到视频流" << std::endl;
+        return;
+    }
+
+    // 获取视频流解码器上下文
+    codec_params = format_context->streams[video_stream]->codecpar;
+    codec = avcodec_find_decoder(codec_params->codec_id);
+    if (!codec) {
+        std::cerr << "找不到解码器" << std::endl;
+        return;
+    }
+
+    codec_context = avcodec_alloc_context3(codec);
+    if (avcodec_parameters_to_context(codec_context, codec_params) < 0) {
+        std::cerr << "无法复制编码参数到解码器上下文" << std::endl;
+        return;
+    }
+
+    if (avcodec_open2(codec_context, codec, nullptr) < 0) {
+        std::cerr << "无法打开解码器" << std::endl;
+        return;
+    }
 }
 
 void Pix::start() {
@@ -16,7 +54,7 @@ void Pix::start() {
 }
 
 // 保存帧为JPEG格式
-void Pix::save_frame_as_jpeg(AVFrame* yuv_frame) {
+void Pix::save_frame_as_jpeg() {
     // 为保存的图像分配缓冲区
     int num_bytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, width_, heigh_, 1);
     uint8_t* buffer = (uint8_t*)av_malloc(num_bytes * sizeof(uint8_t));
@@ -81,50 +119,7 @@ void Pix::save_frame_as_jpeg(AVFrame* yuv_frame) {
 
 // 从RTSP流捕获视频帧
 void Pix::capture_frames_from_rtsp() {
-    AVFormatContext* format_context = nullptr;
-
-    // 打开RTSP流
-    if (avformat_open_input(&format_context, path_.c_str(), nullptr, nullptr) < 0) {
-        std::cerr << "无法打开RTSP流" << std::endl;
-        return;
-    }
-
-    // 查找流信息
-    if (avformat_find_stream_info(format_context, nullptr) < 0) {
-        std::cerr << "无法获取流信息" << std::endl;
-        return;
-    }
-    
-    AVCodec* codec;                                        
-    int video_stream = av_find_best_stream(format_context, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
-    
-    if (video_stream == -1) {
-        std::cerr << "未找到视频流" << std::endl;
-        return;
-    }
-
-    // 获取视频流解码器上下文
-    AVCodecParameters* codec_params = format_context->streams[video_stream]->codecpar;
-    codec = avcodec_find_decoder(codec_params->codec_id);
-    if (!codec) {
-        std::cerr << "找不到解码器" << std::endl;
-        return;
-    }
-
-    AVCodecContext* codec_context = avcodec_alloc_context3(codec);
-    if (avcodec_parameters_to_context(codec_context, codec_params) < 0) {
-        std::cerr << "无法复制编码参数到解码器上下文" << std::endl;
-        return;
-    }
-
-    if (avcodec_open2(codec_context, codec, nullptr) < 0) {
-        std::cerr << "无法打开解码器" << std::endl;
-        return;
-    }
-
     AVPacket packet;
-    AVFrame* frame = av_frame_alloc();
-
     // 开始读取视频流并抽取帧
     while (av_read_frame(format_context, &packet) >= 0) {
         if (packet.stream_index == video_stream) {
@@ -133,20 +128,19 @@ void Pix::capture_frames_from_rtsp() {
                 std::cerr << "解码包失败" << std::endl;
                 break;
             }
-
-            while (avcodec_receive_frame(codec_context, frame) == 0) {
+            while (avcodec_receive_frame(codec_context, yuv_frame) == 0) {
                 // 每隔一定时间抽取一帧并保存为JPEG格式
-                save_frame_as_jpeg(frame);
+                save_frame_as_jpeg();
                 frame_number ++;
             }
         }
         av_packet_unref(&packet);
-        //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
-
+}
+ 
+Pix::~Pix()  {
     // 清理资源
-    av_frame_free(&frame);
+    av_frame_free(&yuv_frame);
     avcodec_free_context(&codec_context);
     avformat_close_input(&format_context);
 }
- 

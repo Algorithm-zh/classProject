@@ -17,13 +17,19 @@ namespace frame {
     public:
       Pix(const std::string path, int width, int height);
       void start();
-      ~Pix() = default;
+      ~Pix();
     private:
-      void save_frame_as_jpeg(AVFrame* yuv_frame);
+      void save_frame_as_jpeg();
       void capture_frames_from_rtsp();
       std::string path_;
       int width_;
       int heigh_;
       int frame_number;
+      AVFormatContext* format_context;
+      AVCodec* codec;                                        
+      AVFrame* yuv_frame;
+      int video_stream;
+      AVCodecContext* codec_context;
+      AVCodecParameters* codec_params;
   };
 }
