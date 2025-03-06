@@ -1,5 +1,5 @@
 #include "pix.h"
-#include <libavformat/avformat.h>
+#include <thread>
 using namespace frame;
 
 
@@ -11,11 +11,28 @@ Pix::Pix(const std::string path, int width, int heigh)  {
   frame_number = 0;
   yuv_frame = av_frame_alloc();
 
-  if (avformat_open_input(&format_context, path_.c_str(), nullptr, nullptr) < 0) {
+   /*  if (avformat_open_input(&format_context, path_.c_str(), nullptr, nullptr) < 0) {
         std::cerr << "无法打开RTSP流" << std::endl;
+        return;
+    } */
+    // 使用avformat_open_input打开摄像头设备流（V4L2）
+  // 这玩意必须必须必须要打开，否则无法找到设备!!!!!!!!!!!!!!!!!!!
+    avdevice_register_all();
+    AVInputFormat* input_format = av_find_input_format("v4l2");
+    if (input_format == nullptr) {
+        std::cerr << "无法找到v4l2输入格式" << std::endl;
         return;
     }
 
+    AVDictionary* options = nullptr;
+    av_dict_set(&options, "video_size", "640x480", 0);
+    av_dict_set(&options, "framerate", "30", 0);
+    av_dict_set(&options, "pixel_format", "yuyv422", 0);
+    
+    if (avformat_open_input(&format_context, path_.c_str(), input_format, &options) < 0) {
+        std::cerr << "无法打开摄像头设备: " << path_ << std::endl;
+        return;
+    }
     // 查找流信息
     if (avformat_find_stream_info(format_context, nullptr) < 0) {
         std::cerr << "无法获取流信息" << std::endl;
@@ -23,6 +40,7 @@ Pix::Pix(const std::string path, int width, int heigh)  {
     }
     
     video_stream = av_find_best_stream(format_context, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
+    std::cout << "video_stream: " << video_stream << std::endl;
     
     if (video_stream == -1) {
         std::cerr << "未找到视频流" << std::endl;
@@ -31,6 +49,7 @@ Pix::Pix(const std::string path, int width, int heigh)  {
 
     // 获取视频流解码器上下文
     codec_params = format_context->streams[video_stream]->codecpar;
+    std::cout << "codec_params: " << codec_params->codec_tag << std::endl;
     codec = avcodec_find_decoder(codec_params->codec_id);
     if (!codec) {
         std::cerr << "找不到解码器" << std::endl;
@@ -70,7 +89,7 @@ void Pix::save_frame_as_jpeg() {
 
     // 设置输出文件名
     char filename[1024];
-    snprintf(filename, sizeof(filename), "../image/frame%03d.jpg", frame_number);
+    snprintf(filename, sizeof(filename), "../../mux-dev/image/frame%03d.jpg", frame_number);
 
     // 打开JPEG文件
     FILE* outfile = fopen(filename, "wb");
@@ -135,6 +154,7 @@ void Pix::capture_frames_from_rtsp() {
             }
         }
         av_packet_unref(&packet);
+        std::this_thread::sleep_for(std::chrono::milliseconds(interval_));
     }
 }
  
@@ -143,4 +163,8 @@ Pix::~Pix()  {
     av_frame_free(&yuv_frame);
     avcodec_free_context(&codec_context);
     avformat_close_input(&format_context);
+}
+ 
+void Pix::set_interval(int64_t interval)  {
+  interval_ = interval;
 }

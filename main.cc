@@ -2,7 +2,9 @@
 using namespace frame;
 
 int main() {
-  Pix pix("rtsp://admin:admin@172.16.19.104:554/stream2", 640, 480);
+  Pix pix("/dev/video0", 640, 480);
+  //pix.set_interval(5000);
   pix.start();
   return 0;
 }
+
